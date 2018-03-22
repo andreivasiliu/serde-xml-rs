@@ -49,6 +49,7 @@ extern crate serde_derive;
 mod error;
 pub mod de;
 pub mod ser;
+pub mod adapter;
 
 pub use error::{Error, ErrorKind};
 pub use xml::reader::{EventReader, ParserConfig};
