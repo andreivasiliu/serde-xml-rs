@@ -40,6 +40,7 @@ extern crate log;
 #[macro_use]
 extern crate serde;
 extern crate xml;
+extern crate quick_xml;
 
 #[cfg(test)]
 #[macro_use]

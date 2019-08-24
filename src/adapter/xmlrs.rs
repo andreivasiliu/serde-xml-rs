@@ -4,18 +4,14 @@ use xml::reader::{EventReader, XmlEvent};
 use xml::name::{Name, OwnedName};
 use xml::attribute::{Attribute, OwnedAttribute};
 
-use error::{ErrorKind, Result};
+pub use super::*;
+use error::Result;
 
-
-#[derive(Clone, Eq, PartialEq, Hash, Debug)]
-pub struct GenericXmlName {
-    name: String,
-}
 
 impl From<OwnedName> for GenericXmlName {
     fn from(other: OwnedName) -> GenericXmlName {
         return GenericXmlName {
-            name: other.local_name.clone(),
+            local_name: other.local_name.clone(),
         }
     }
 }
@@ -23,15 +19,9 @@ impl From<OwnedName> for GenericXmlName {
 impl<'a> From<Name<'a>> for GenericXmlName {
     fn from(other: Name) -> GenericXmlName {
         return GenericXmlName {
-            name: other.local_name.to_string(),
+            local_name: other.local_name.to_string(),
         }
     }
-}
-
-#[derive(Clone, Eq, PartialEq, Hash, Debug)]
-pub struct GenericXmlAttribute {
-    name: GenericXmlName,
-    value: String,
 }
 
 impl<'a> From<Attribute<'a>> for GenericXmlAttribute {
@@ -52,43 +42,32 @@ impl From<OwnedAttribute> for GenericXmlAttribute {
     }
 }
 
-#[derive(PartialEq, Clone)]
-pub enum GenericXmlEvent {
-    EndDocument,
-
-    StartElement {
-        name: GenericXmlName,
-        attributes: Vec<GenericXmlAttribute>,
-    },
-
-    EndElement {
-        name: GenericXmlName,
-    },
-
-    Characters(String),
-}
-
-pub trait GenericEventReader {
-    fn next(&mut self) -> Result<GenericXmlEvent>;
-}
-
 impl<R: Read> GenericEventReader for EventReader<R> {
     fn next(&mut self) -> Result<GenericXmlEvent> {
         loop {
-            let event = self.next();
+            let event = self.next().map_err(ErrorKind::Syntax)?;
             return match event {
-                Ok(XmlEvent::EndDocument) => Ok(GenericXmlEvent::EndDocument),
-                Ok(XmlEvent::EndElement {name}) => Ok(GenericXmlEvent::EndElement {name: name.into()}),
-                Ok(XmlEvent::Characters(characters)) => Ok(GenericXmlEvent::Characters(characters)),
-                Ok(XmlEvent::StartElement {name, attributes, namespace: _namespace}) => Ok(GenericXmlEvent::StartElement {
+                XmlEvent::EndDocument => Ok(GenericXmlEvent::EndDocument),
+                XmlEvent::EndElement { name } => Ok(GenericXmlEvent::EndElement { name: name.into() }),
+                XmlEvent::Characters(characters) => Ok(GenericXmlEvent::Characters(characters)),
+                XmlEvent::StartElement { name, attributes, namespace: _namespace } => Ok(GenericXmlEvent::StartElement {
                     name: name.into(),
                     attributes: attributes.into_iter().map(|attr| attr.into()).collect(),
                 }),
-                Ok(_) => continue,
-                Err(e) => Err(ErrorKind::Custom(e.to_string()).into()),
+                _ => continue,
             }
         }
     }
 }
 
-
+//pub trait GenericEventReaderBuilder<R: Read, C> {
+//    fn new_with_config(source: R, config: C) -> Self;
+//}
+//
+//impl<R: Read> GenericEventReaderBuilder<R, ParserConfig> for EventReader<R> {
+//    fn new_with_config(source: R, config: ParserConfig) -> Self {
+//        EventReader::new_with_config(source, config)
+//    }
+//}
+//
+//

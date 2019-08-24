@@ -1,35 +1,32 @@
-use std::io::Read;
-
 use serde::de::{self, Deserializer as SerdeDeserializer, IntoDeserializer};
-use xml::name::OwnedName;
-use xml::reader::XmlEvent;
 
 use de::Deserializer;
 use error::{Error, Result};
+use adapter::xmlrs::{GenericEventReader, GenericXmlEvent, GenericXmlName};
 
-pub struct EnumAccess<'a, R: 'a + Read> {
-    de: &'a mut Deserializer<R>,
+pub struct EnumAccess<'a, E: 'a + GenericEventReader> {
+    de: &'a mut Deserializer<E>,
 }
 
-impl<'a, R: 'a + Read> EnumAccess<'a, R> {
-    pub fn new(de: &'a mut Deserializer<R>) -> Self {
+impl<'a, E: 'a + GenericEventReader> EnumAccess<'a, E> {
+    pub fn new(de: &'a mut Deserializer<E>) -> Self {
         EnumAccess { de: de }
     }
 }
 
-impl<'de, 'a, R: 'a + Read> de::EnumAccess<'de> for EnumAccess<'a, R> {
+impl<'de, 'a, E: 'a + GenericEventReader> de::EnumAccess<'de> for EnumAccess<'a, E> {
     type Error = Error;
-    type Variant = VariantAccess<'a, R>;
+    type Variant = VariantAccess<'a, E>;
 
     fn variant_seed<V: de::DeserializeSeed<'de>>(
         self,
         seed: V,
-    ) -> Result<(V::Value, VariantAccess<'a, R>)> {
+    ) -> Result<(V::Value, VariantAccess<'a, E>)> {
         let name = expect!(
             self.de.peek()?,
 
-            &XmlEvent::Characters(ref name) |
-            &XmlEvent::StartElement { name: OwnedName { local_name: ref name, .. }, .. } => {
+            &GenericXmlEvent::Characters(ref name) |
+            &GenericXmlEvent::StartElement { name: GenericXmlName { local_name: ref name, .. }, .. } => {
                 seed.deserialize(name.as_str().into_deserializer())
             }
         )?;
@@ -38,30 +35,30 @@ impl<'de, 'a, R: 'a + Read> de::EnumAccess<'de> for EnumAccess<'a, R> {
     }
 }
 
-pub struct VariantAccess<'a, R: 'a + Read> {
-    de: &'a mut Deserializer<R>,
+pub struct VariantAccess<'a, E: 'a + GenericEventReader> {
+    de: &'a mut Deserializer<E>,
 }
 
-impl<'a, R: 'a + Read> VariantAccess<'a, R> {
-    pub fn new(de: &'a mut Deserializer<R>) -> Self {
+impl<'a, E: 'a + GenericEventReader> VariantAccess<'a, E> {
+    pub fn new(de: &'a mut Deserializer<E>) -> Self {
         VariantAccess { de: de }
     }
 }
 
-impl<'de, 'a, R: 'a + Read> de::VariantAccess<'de> for VariantAccess<'a, R> {
+impl<'de, 'a, E: 'a + GenericEventReader> de::VariantAccess<'de> for VariantAccess<'a, E> {
     type Error = Error;
 
     fn unit_variant(self) -> Result<()> {
         self.de.unset_map_value();
         match self.de.next()? {
-            XmlEvent::StartElement {
+            GenericXmlEvent::StartElement {
                 name, attributes, ..
             } => if attributes.is_empty() {
                 self.de.expect_end_element(name)
             } else {
                 Err(de::Error::invalid_length(attributes.len(), &"0"))
             },
-            XmlEvent::Characters(_) => Ok(()),
+            GenericXmlEvent::Characters(_) => Ok(()),
             _ => unreachable!(),
         }
     }

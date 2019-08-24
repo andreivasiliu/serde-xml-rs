@@ -1,21 +1,19 @@
-use std::io::Read;
-
 use serde::de;
-use xml::reader::XmlEvent;
 
 use de::Deserializer;
 use error::{Error, Result};
+use adapter::xmlrs::{GenericEventReader, GenericXmlEvent};
 
-pub struct SeqAccess<'a, R: 'a + Read> {
-    de: &'a mut Deserializer<R>,
+pub struct SeqAccess<'a, E: 'a + GenericEventReader> {
+    de: &'a mut Deserializer<E>,
     max_size: Option<usize>,
     expected_name: Option<String>,
 }
 
-impl<'a, R: 'a + Read> SeqAccess<'a, R> {
-    pub fn new(de: &'a mut Deserializer<R>, max_size: Option<usize>) -> Self {
+impl<'a, E: 'a + GenericEventReader> SeqAccess<'a, E> {
+    pub fn new(de: &'a mut Deserializer<E>, max_size: Option<usize>) -> Self {
         let expected_name = if de.unset_map_value() {
-            debug_expect!(de.peek(), Ok(&XmlEvent::StartElement { ref name, .. }) => {
+            debug_expect!(de.peek(), Ok(&GenericXmlEvent::StartElement { ref name, .. }) => {
                 Some(name.local_name.clone())
             })
         } else {
@@ -29,7 +27,7 @@ impl<'a, R: 'a + Read> SeqAccess<'a, R> {
     }
 }
 
-impl<'de, 'a, R: 'a + Read> de::SeqAccess<'de> for SeqAccess<'a, R> {
+impl<'de, 'a, E: 'a + GenericEventReader> de::SeqAccess<'de> for SeqAccess<'a, E> {
     type Error = Error;
 
     fn next_element_seed<T: de::DeserializeSeed<'de>>(
@@ -46,12 +44,12 @@ impl<'de, 'a, R: 'a + Read> de::SeqAccess<'de> for SeqAccess<'a, R> {
             None => {},
         }
         let more = match (self.de.peek()?, self.expected_name.as_ref()) {
-            (&XmlEvent::StartElement { ref name, .. }, Some(expected_name)) => {
+            (&GenericXmlEvent::StartElement { ref name, .. }, Some(expected_name)) => {
                 &name.local_name == expected_name
             },
-            (&XmlEvent::EndElement { .. }, None) |
+            (&GenericXmlEvent::EndElement { .. }, None) |
             (_, Some(_)) |
-            (&XmlEvent::EndDocument { .. }, _) => false,
+            (&GenericXmlEvent::EndDocument { .. }, _) => false,
             (_, None) => true,
         };
         if more {

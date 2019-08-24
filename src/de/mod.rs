@@ -1,8 +1,7 @@
 use std::io::Read;
 
 use serde::de;
-use xml::reader::{EventReader, ParserConfig, XmlEvent};
-use xml::name::OwnedName;
+use xml::reader::{EventReader, ParserConfig};
 
 use error::{Error, ErrorKind, Result};
 use self::map::MapAccess;
@@ -12,6 +11,8 @@ use self::var::EnumAccess;
 mod map;
 mod seq;
 mod var;
+
+use adapter::{GenericEventReader, GenericXmlEvent, GenericXmlName};
 
 /// A convenience method for deserialize some object from a string.
 ///
@@ -57,18 +58,28 @@ pub fn from_str<'de, T: de::Deserialize<'de>>(s: &str) -> Result<T> {
 /// # }
 /// ```
 pub fn from_reader<'de, R: Read, T: de::Deserialize<'de>>(reader: R) -> Result<T> {
-    T::deserialize(&mut Deserializer::new_from_reader(reader))
+    let config = ParserConfig::new()
+        .trim_whitespace(true)
+        .whitespace_to_characters(true)
+        .cdata_to_characters(true)
+        .ignore_comments(true)
+        .coalesce_characters(true);
+
+    let event_reader: EventReader<R> = EventReader::new_with_config(reader, config);
+
+    let mut event_reader = Deserializer::new(event_reader);
+    T::deserialize(&mut event_reader)
 }
 
-pub struct Deserializer<R: Read> {
+pub struct Deserializer<E: GenericEventReader> {
     depth: usize,
-    reader: EventReader<R>,
-    peeked: Option<XmlEvent>,
+    reader: E,
+    peeked: Option<GenericXmlEvent>,
     is_map_value: bool,
 }
 
-impl<'de, R: Read> Deserializer<R> {
-    pub fn new(reader: EventReader<R>) -> Self {
+impl<'de, E: GenericEventReader> Deserializer<E> {
+    pub fn new(reader: E) -> Self {
         Deserializer {
             depth: 0,
             reader: reader,
@@ -77,20 +88,22 @@ impl<'de, R: Read> Deserializer<R> {
         }
     }
 
-    pub fn new_from_reader(reader: R) -> Self {
-        let config = ParserConfig::new()
-            .trim_whitespace(true)
-            .whitespace_to_characters(true)
-            .cdata_to_characters(true)
-            .ignore_comments(true)
-            .coalesce_characters(true);
-
-        Self::new(EventReader::new_with_config(reader, config))
-    }
-
-    fn peek(&mut self) -> Result<&XmlEvent> {
+//    pub fn new_from_reader<R: Read>(reader: R) -> Self {
+//        let config = ParserConfig::new()
+//            .trim_whitespace(true)
+//            .whitespace_to_characters(true)
+//            .cdata_to_characters(true)
+//            .ignore_comments(true)
+//            .coalesce_characters(true);
+//
+//        let event_reader: E = E::new_with_config(reader, config);
+//
+//        Self::new(event_reader)
+//    }
+//
+    fn peek(&mut self) -> Result<&GenericXmlEvent> {
         if self.peeked.is_none() {
-            self.peeked = Some(self.inner_next()?);
+            self.peeked = Some(self.reader.next()?);
         }
         debug_expect!(self.peeked.as_ref(), Some(peeked) => {
             debug!("Peeked {:?}", peeked);
@@ -98,28 +111,17 @@ impl<'de, R: Read> Deserializer<R> {
         })
     }
 
-    fn inner_next(&mut self) -> Result<XmlEvent> {
-        loop {
-            match self.reader.next().map_err(ErrorKind::Syntax)? {
-                XmlEvent::StartDocument { .. } |
-                XmlEvent::ProcessingInstruction { .. } |
-                XmlEvent::Comment(_) => { /* skip */ },
-                other => return Ok(other),
-            }
-        }
-    }
-
-    fn next(&mut self) -> Result<XmlEvent> {
+    fn next(&mut self) -> Result<GenericXmlEvent> {
         let next = if let Some(peeked) = self.peeked.take() {
             peeked
         } else {
-            self.inner_next()?
+            self.reader.next()?
         };
         match next {
-            XmlEvent::StartElement { .. } => {
+            GenericXmlEvent::StartElement { .. } => {
                 self.depth += 1;
             },
-            XmlEvent::EndElement { .. } => {
+            GenericXmlEvent::EndElement { .. } => {
                 self.depth -= 1;
             },
             _ => {},
@@ -141,7 +143,7 @@ impl<'de, R: Read> Deserializer<R> {
         f: F,
     ) -> Result<T> {
         if self.unset_map_value() {
-            debug_expect!(self.next(), Ok(XmlEvent::StartElement { name, .. }) => {
+            debug_expect!(self.next(), Ok(GenericXmlEvent::StartElement { name, .. }) => {
                 let result = f(self)?;
                 self.expect_end_element(name)?;
                 Ok(result)
@@ -151,8 +153,8 @@ impl<'de, R: Read> Deserializer<R> {
         }
     }
 
-    fn expect_end_element(&mut self, start_name: OwnedName) -> Result<()> {
-        expect!(self.next()?, XmlEvent::EndElement { name, .. } => {
+    fn expect_end_element(&mut self, start_name: GenericXmlName) -> Result<()> {
+        expect!(self.next()?, GenericXmlEvent::EndElement { name, .. } => {
             if name == start_name {
                 Ok(())
             } else {
@@ -166,17 +168,17 @@ impl<'de, R: Read> Deserializer<R> {
     }
 
     fn prepare_parse_type<V: de::Visitor<'de>>(&mut self) -> Result<String> {
-        if let XmlEvent::StartElement { .. } = *self.peek()? {
+        if let GenericXmlEvent::StartElement { .. } = *self.peek()? {
             self.set_map_value()
         }
         self.read_inner_value::<V, String, _>(|this| {
-            if let XmlEvent::EndElement { .. } = *this.peek()? {
+            if let GenericXmlEvent::EndElement { .. } = *this.peek()? {
                 return Err(
                     ErrorKind::UnexpectedToken("EndElement".into(), "Characters".into()).into(),
                 );
             }
 
-            expect!(this.next()?, XmlEvent::Characters(s) => {
+            expect!(this.next()?, GenericXmlEvent::Characters(s) => {
                 return Ok(s)
             })
         })
@@ -192,7 +194,7 @@ macro_rules! deserialize_type {
     }
 }
 
-impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
+impl<'de, 'a, E: GenericEventReader> de::Deserializer<'de> for &'a mut Deserializer<E> {
     type Error = Error;
 
     forward_to_deserialize_any! {
@@ -206,7 +208,7 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
         visitor: V,
     ) -> Result<V::Value> {
         self.unset_map_value();
-        expect!(self.next()?, XmlEvent::StartElement { name, attributes, .. } => {
+        expect!(self.next()?, GenericXmlEvent::StartElement { name, attributes, .. } => {
             let map_value = visitor.visit_map(MapAccess::new(
                 self,
                 attributes,
@@ -246,11 +248,11 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
     }
 
     fn deserialize_unit<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        if let XmlEvent::StartElement { .. } = *self.peek()? {
+        if let GenericXmlEvent::StartElement { .. } = *self.peek()? {
             self.set_map_value()
         }
         self.read_inner_value::<V, V::Value, _>(
-            |this| expect!(this.peek()?, &XmlEvent::EndElement { .. } => visitor.visit_unit()),
+            |this| expect!(this.peek()?, &GenericXmlEvent::EndElement { .. } => visitor.visit_unit()),
         )
     }
 
@@ -285,14 +287,14 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
     }
 
     fn deserialize_string<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        if let XmlEvent::StartElement { .. } = *self.peek()? {
+        if let GenericXmlEvent::StartElement { .. } = *self.peek()? {
             self.set_map_value()
         }
         self.read_inner_value::<V, V::Value, _>(|this| {
-            if let XmlEvent::EndElement { .. } = *this.peek()? {
+            if let GenericXmlEvent::EndElement { .. } = *this.peek()? {
                 return visitor.visit_str("");
             }
-            expect!(this.next()?, XmlEvent::Characters(s) => {
+            expect!(this.next()?, GenericXmlEvent::Characters(s) => {
                 visitor.visit_string(s)
             })
         })
@@ -304,7 +306,7 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
 
     fn deserialize_map<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.unset_map_value();
-        expect!(self.next()?, XmlEvent::StartElement { name, attributes, .. } => {
+        expect!(self.next()?, GenericXmlEvent::StartElement { name, attributes, .. } => {
             let map_value = visitor.visit_map(MapAccess::new(self, attributes, false))?;
             self.expect_end_element(name)?;
             Ok(map_value)
@@ -313,7 +315,7 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
 
     fn deserialize_option<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match *self.peek()? {
-            XmlEvent::EndElement { .. } => visitor.visit_none(),
+            GenericXmlEvent::EndElement { .. } => visitor.visit_none(),
             _ => visitor.visit_some(self),
         }
     }
@@ -332,8 +334,8 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
 
     fn deserialize_any<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         match *self.peek()? {
-            XmlEvent::StartElement { .. } => self.deserialize_map(visitor),
-            XmlEvent::EndElement { .. } => self.deserialize_unit(visitor),
+            GenericXmlEvent::StartElement { .. } => self.deserialize_map(visitor),
+            GenericXmlEvent::EndElement { .. } => self.deserialize_unit(visitor),
             _ => self.deserialize_string(visitor),
         }
     }
