@@ -71,6 +71,11 @@ pub fn from_reader<'de, R: Read, T: de::Deserialize<'de>>(reader: R) -> Result<T
     T::deserialize(&mut event_reader)
 }
 
+pub fn from_other_reader<'de, E: GenericEventReader, T: de::Deserialize<'de>>(reader: E) -> Result<T> {
+    let mut event_reader = Deserializer::new(reader);
+    T::deserialize(&mut event_reader)
+}
+
 pub struct Deserializer<E: GenericEventReader> {
     depth: usize,
     reader: E,

@@ -1,4 +1,5 @@
 pub mod xmlrs;
+pub mod quickxml;
 
 use error::{ErrorKind, Result};
 

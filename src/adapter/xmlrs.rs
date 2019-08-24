@@ -60,6 +60,30 @@ impl<R: Read> GenericEventReader for EventReader<R> {
     }
 }
 
+//fn generic_next<R: Read>(reader: &mut EventReader<R>) -> GenericXmlEvent {
+//    loop {
+//        let event = reader.next().unwrap();
+//        return match event {
+//            XmlEvent::EndDocument => GenericXmlEvent::EndDocument,
+//            XmlEvent::EndElement { name } => GenericXmlEvent::EndElement {
+//                name: GenericXmlName { local_name: name.local_name.to_string() },
+//            },
+//            XmlEvent::Characters(characters) => GenericXmlEvent::Characters(characters),
+//            XmlEvent::StartElement { name, attributes, namespace: _namespace } => GenericXmlEvent::StartElement {
+//                name: GenericXmlName { local_name: name.local_name.to_string() },
+//                attributes: attributes.into_iter().map(|attr| GenericXmlAttribute {
+//                    name: GenericXmlName { local_name: attr.name.to_string() },
+//                    value: attr.value.to_string(),
+//                }).collect(),
+//            },
+//            _ => continue,
+//        }
+//    }
+//}
+//
+
+
+
 //pub trait GenericEventReaderBuilder<R: Read, C> {
 //    fn new_with_config(source: R, config: C) -> Self;
 //}
